@@ -1,93 +1,239 @@
-
-#include <WebServer.h>
+#include "esp_camera.h"
 #include <WiFi.h>
-#include <esp32cam.h>
- 
-const char* WIFI_SSID = "Fawad";
-const char* WIFI_PASS = "computer007";
- 
+#include "esp_timer.h"
+#include "img_converters.h"
+#include "Arduino.h"
+#include "fb_gfx.h"
+#include "soc/soc.h"          
+#include "soc/rtc_cntl_reg.h" 
+#include "WebServer.h"
+
+// Replace with your WiFi credentials
+const char* ssid = "Airtel_suba_0676";
+const char* password = "Air@97323";
+
+// AI-Thinker ESP32-CAM pin configuration
+#define PWDN_GPIO_NUM     32
+#define RESET_GPIO_NUM    -1
+#define XCLK_GPIO_NUM      0
+#define SIOD_GPIO_NUM     26
+#define SIOC_GPIO_NUM     27
+
+#define Y9_GPIO_NUM       35
+#define Y8_GPIO_NUM       34
+#define Y7_GPIO_NUM       39
+#define Y6_GPIO_NUM       36
+#define Y5_GPIO_NUM       21
+#define Y4_GPIO_NUM       19
+#define Y3_GPIO_NUM       18
+#define Y2_GPIO_NUM        5
+
+#define VSYNC_GPIO_NUM    25
+#define HREF_GPIO_NUM     23
+#define PCLK_GPIO_NUM     22
+
 WebServer server(80);
- 
- 
-static auto loRes = esp32cam::Resolution::find(320, 240);
-static auto midRes = esp32cam::Resolution::find(350, 530);
-static auto hiRes = esp32cam::Resolution::find(800, 600);
-void serveJpg()
-{
-  auto frame = esp32cam::capture();
-  if (frame == nullptr) {
-    Serial.println("CAPTURE FAIL");
-    server.send(503, "", "");
+
+void handle_jpg_stream(void) {
+  WiFiClient client = server.client();
+  String response = "HTTP/1.1 200 OK\r\n";
+  response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
+  server.sendContent(response);
+
+  while (true) {
+    camera_fb_t * fb = esp_camera_fb_get();
+    if (!fb) {
+      Serial.println("Camera capture failed");
+      return;
+    }
+
+    response = "--frame\r\n";
+    response += "Content-Type: image/jpeg\r\n\r\n";
+    server.sendContent(response);
+
+    client.write(fb->buf, fb->len);
+    server.sendContent("\r\n");
+    esp_camera_fb_return(fb);
+
+    if (!client.connected()) break;
+  }
+}
+
+void setup() {
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
+  Serial.begin(115200);
+  Serial.setDebugOutput(true);
+  Serial.println();
+
+  // Camera configuration
+  camera_config_t config;
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+  config.pin_sscb_sda = SIOD_GPIO_NUM;
+  config.pin_sscb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_JPEG;
+
+  // Safe memory settings to avoid FB-OVF
+  if (psramFound()) {
+    config.frame_size = FRAMESIZE_VGA;  // medium resolution
+    config.jpeg_quality = 12;
+    config.fb_count = 2;
+  } else {
+    config.frame_size = FRAMESIZE_QVGA; // smaller resolution
+    config.jpeg_quality = 20;
+    config.fb_count = 1;
+  }
+
+  // Camera init
+  esp_err_t err = esp_camera_init(&config);
+  if (err != ESP_OK) {
+    Serial.printf("Camera init failed with error 0x%x", err);
     return;
   }
-  Serial.printf("CAPTURE OK %dx%d %db\n", frame->getWidth(), frame->getHeight(),
-                static_cast<int>(frame->size()));
- 
-  server.setContentLength(frame->size());
-  server.send(200, "image/jpeg");
-  WiFiClient client = server.client();
-  frame->writeTo(client);
-}
- 
-void handleJpgLo()
-{
-  if (!esp32cam::Camera.changeResolution(loRes)) {
-    Serial.println("SET-LO-RES FAIL");
-  }
-  serveJpg();
-}
- 
-void handleJpgHi()
-{
-  if (!esp32cam::Camera.changeResolution(hiRes)) {
-    Serial.println("SET-HI-RES FAIL");
-  }
-  serveJpg();
-}
- 
-void handleJpgMid()
-{
-  if (!esp32cam::Camera.changeResolution(midRes)) {
-    Serial.println("SET-MID-RES FAIL");
-  }
-  serveJpg();
-}
- 
- 
-void  setup(){
-  Serial.begin(115200);
-  Serial.println();
-  {
-    using namespace esp32cam;
-    Config cfg;
-    cfg.setPins(pins::AiThinker);
-    cfg.setResolution(hiRes);
-    cfg.setBufferCount(2);
-    cfg.setJpeg(80);
- 
-    bool ok = Camera.begin(cfg);
-    Serial.println(ok ? "CAMERA OK" : "CAMERA FAIL");
-  }
-  WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
+    Serial.print(".");
   }
-  Serial.print("http://");
+  Serial.println();
+  Serial.print("WiFi connected! Stream URL: http://");
   Serial.println(WiFi.localIP());
-  Serial.println("  /cam-lo.jpg");
-  Serial.println("  /cam-hi.jpg");
-  Serial.println("  /cam-mid.jpg");
- 
-  server.on("/cam-lo.jpg", handleJpgLo);
-  server.on("/cam-hi.jpg", handleJpgHi);
-  server.on("/cam-mid.jpg", handleJpgMid);
- 
+
+  // Start camera server
+  server.on("/", HTTP_GET, handle_jpg_stream);
   server.begin();
 }
- 
-void loop()
-{
+
+void loop() {
   server.handleClient();
 }
+// #include "esp_camera.h"
+// #include <WiFi.h>
+
+// // Replace with your credentials
+// const char* ssid = "Airtel_suba_0676";
+// const char* password = "Air@97323";
+
+// // AI Thinker pin configuration
+// #define PWDN_GPIO_NUM     32
+// #define RESET_GPIO_NUM    -1
+// #define XCLK_GPIO_NUM      0
+// #define SIOD_GPIO_NUM     26
+// #define SIOC_GPIO_NUM     27
+// #define Y9_GPIO_NUM       35
+// #define Y8_GPIO_NUM       34
+// #define Y7_GPIO_NUM       39
+// #define Y6_GPIO_NUM       36
+// #define Y5_GPIO_NUM       21
+// #define Y4_GPIO_NUM       19
+// #define Y3_GPIO_NUM       18
+// #define Y2_GPIO_NUM        5
+// #define VSYNC_GPIO_NUM    25
+// #define HREF_GPIO_NUM     23
+// #define PCLK_GPIO_NUM     22
+
+// #include "esp_camera.h"
+// #include <WebServer.h>
+
+// WebServer server(80);
+
+// void handle_jpg_stream() {
+//   WiFiClient client = server.client();
+//   String response = "HTTP/1.1 200 OK\r\n";
+//   response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
+//   server.sendContent(response);
+
+//   while (true) {
+//     camera_fb_t * fb = esp_camera_fb_get();
+//     if (!fb) {
+//       Serial.println("Camera capture failed");
+//       return;
+//     }
+//     response = "--frame\r\n";
+//     response += "Content-Type: image/jpeg\r\n\r\n";
+//     server.sendContent(response);
+
+//     client.write(fb->buf, fb->len);
+//     server.sendContent("\r\n");
+//     esp_camera_fb_return(fb);
+
+//     if (!client.connected()) break;
+//   }
+// }
+
+// void setup() {
+//   Serial.begin(115200);
+
+//   camera_config_t config;
+//   config.ledc_channel = LEDC_CHANNEL_0;
+//   config.ledc_timer = LEDC_TIMER_0;
+//   config.pin_d0 = Y2_GPIO_NUM;
+//   config.pin_d1 = Y3_GPIO_NUM;
+//   config.pin_d2 = Y4_GPIO_NUM;
+//   config.pin_d3 = Y5_GPIO_NUM;
+//   config.pin_d4 = Y6_GPIO_NUM;
+//   config.pin_d5 = Y7_GPIO_NUM;
+//   config.pin_d6 = Y8_GPIO_NUM;
+//   config.pin_d7 = Y9_GPIO_NUM;
+//   config.pin_xclk = XCLK_GPIO_NUM;
+//   config.pin_pclk = PCLK_GPIO_NUM;
+//   config.pin_vsync = VSYNC_GPIO_NUM;
+//   config.pin_href = HREF_GPIO_NUM;
+//   config.pin_sscb_sda = SIOD_GPIO_NUM;
+//   config.pin_sscb_scl = SIOC_GPIO_NUM;
+//   config.pin_pwdn = PWDN_GPIO_NUM;
+//   config.pin_reset = RESET_GPIO_NUM;
+//   config.xclk_freq_hz = 20000000;
+//   config.pixel_format = PIXFORMAT_JPEG;
+//   config.frame_size = FRAMESIZE_VGA;
+//   config.jpeg_quality = 12;
+//   config.fb_count = 2;
+
+//   esp_err_t err = esp_camera_init(&config);
+//   if (err != ESP_OK) {
+//     Serial.printf("Camera init failed with error 0x%x", err);
+//     return;
+//   }
+
+//   WiFi.begin(ssid, password);
+//   while (WiFi.status() != WL_CONNECTED) {
+//     delay(500);
+//     Serial.print(".");
+//   }
+//   Serial.println("");
+//   Serial.println("WiFi connected");
+//   Serial.print("Camera Stream Ready! Go to: http://");
+//   Serial.println(WiFi.localIP());
+
+//   server.on("/", HTTP_GET, []() {
+//     server.send(200, "text/plain", "ESP32-CAM Stream Ready");
+//   });
+
+//   server.on("/stream", HTTP_GET, handle_jpg_stream);
+//   server.begin();
+// }
+
+// void loop() {
+//   server.handleClient();
+// }
+
+
+
