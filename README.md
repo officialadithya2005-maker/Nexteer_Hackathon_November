@@ -2,7 +2,7 @@
 
 ---
 
-## 🚗 Smart Parking System – Data-Driven Intelligent Parking Solution
+## 🚗 IntelliPark – Intelligent Parking Solution
 
 ### **Concept Overview**
 
@@ -15,7 +15,6 @@ All data is synced to **Google Sheets** for cloud logging and displayed on a **l
 ### **System Components**
 
 1. **ESP32-CAM** – Captures vehicle images at the parking entrance/exit.
-2. **Ultrasonic Sensor** – Detects vehicle presence in each slot (or entry point).
 3. **Number Plate Recognition (OpenCV + API)** – Extracts and identifies the vehicle number.
 4. **Google Sheets (Apps Script Integration)** – Stores timestamp, slot ID, and vehicle number.
 5. **Local Web Dashboard** – Displays live parking data and analytics from Sheets (using Google Sheets API or Apps Script web app).
@@ -25,8 +24,7 @@ All data is synced to **Google Sheets** for cloud logging and displayed on a **l
 ### **Data Flow**
 
 ```
-[Vehicle Detected by Ultrasonic Sensor]
-              ↓
+
        [ESP32-CAM Captures Image]
               ↓
  [OpenCV / API Performs Number Plate Detection]
